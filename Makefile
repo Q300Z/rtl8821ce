@@ -1,5 +1,5 @@
 ccflags-y += $(USER_EXTRA_CFLAGS)
-ccflags-y += -O1
+ccflags-y += -O2
 #ccflags-y += -O3
 #ccflags-y += -Wall
 #ccflags-y += -Wextra
@@ -58,7 +58,7 @@ CONFIG_SDIO_HCI = n
 CONFIG_GSPI_HCI = n
 ########################## Features ###########################
 CONFIG_MP_INCLUDED = y
-CONFIG_POWER_SAVING = y
+CONFIG_POWER_SAVING = n
 CONFIG_USB_AUTOSUSPEND = n
 CONFIG_HW_PWRP_DETECTION = n
 CONFIG_WIFI_TEST = n
@@ -2240,8 +2240,11 @@ export CONFIG_RTL8821CE = m
 
 all: modules
 
+defconfig:
+	@echo "No configuration needed for out-of-tree driver."
+
 modules:
-	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd)  modules
+	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd) modules
 
 strip:
 	$(CROSS_COMPILE)strip $(MODULE_NAME).ko --strip-unneeded
@@ -2296,18 +2299,14 @@ config_r:
 .PHONY: modules clean
 
 clean:
-	#$(MAKE) -C $(KSRC) M=$(shell pwd) clean
-	cd hal ; rm -fr */*/*/*.mod.c */*/*/*.mod */*/*/*.o */*/*/.*.cmd */*/*/*.ko
-	cd hal ; rm -fr */*/*.mod.c */*/*.mod */*/*.o */*/.*.cmd */*/*.ko
-	cd hal ; rm -fr */*.mod.c */*.mod */*.o */.*.cmd */*.ko
-	cd hal ; rm -fr *.mod.c *.mod *.o .*.cmd *.ko
-	cd core ; rm -fr */*.mod.c */*.mod */*.o */.*.cmd */*.ko
-	cd core ; rm -fr *.mod.c *.mod *.o .*.cmd *.ko
-	cd os_dep/linux ; rm -fr *.mod.c *.mod *.o .*.cmd *.ko
-	cd os_dep ; rm -fr *.mod.c *.mod *.o .*.cmd *.ko
-	cd platform ; rm -fr *.mod.c *.mod *.o .*.cmd *.ko
-	rm -fr Module.symvers ; rm -fr Module.markers ; rm -fr modules.order
-	rm -fr *.mod.c *.mod *.o .*.cmd *.ko *~
-	rm -fr .tmp_versions
+	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KSRC) M=$(shell pwd) clean || true
+	find . -name "*.o" -type f -delete || true
+	find . -name "*.ko" -type f -delete || true
+	find . -name "*.mod.c" -type f -delete || true
+	find . -name "*.mod" -type f -delete || true
+	find . -name ".*.cmd" -type f -delete || true
+	find . -name "modules.order" -type f -delete || true
+	find . -name "Module.symvers" -type f -delete || true
+	rm -rf .tmp_versions || true
 endif
 

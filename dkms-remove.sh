@@ -12,6 +12,7 @@ DRV_VERSION=v5.5.2_34066.20200325
 
 dkms remove ${DRV_NAME}/${DRV_VERSION} --all
 rm -rf /usr/src/${DRV_NAME}-${DRV_VERSION}
+rm -f /etc/modprobe.d/blacklist-rtl8821ce.conf
 
 RESULT=$?
 if [[ "$RESULT" != "0" ]]; then

@@ -7,3 +7,7 @@ src/
 pkg/
 rtl8821ce/
 *.pkg.tar
+.idea
+build_cache
+build.log
+cppcheck_results.txt

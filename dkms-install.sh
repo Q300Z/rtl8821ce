@@ -17,6 +17,10 @@ dkms build -m ${DRV_NAME} -v ${DRV_VERSION}
 dkms install -m ${DRV_NAME} -v ${DRV_VERSION}
 RESULT=$?
 
+echo "Blacklisting rtw88_8821ce to avoid conflicts..."
+echo "blacklist rtw88_8821ce" > /etc/modprobe.d/blacklist-rtl8821ce.conf
+echo "install rtw88_8821ce /bin/true" >> /etc/modprobe.d/blacklist-rtl8821ce.conf
+
 echo "Finished running dkms install steps."
 
 exit $RESULT
