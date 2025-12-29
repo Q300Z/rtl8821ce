@@ -169,6 +169,11 @@ u32 phydm_db_2_linear(u32 value)
 	i = (u8)((value - 1) >> 3);
 	j = (u8)(value - 1) - (i << 3);
 
+	if (i >= 12) {
+		i = 11;
+		j = 7;
+	}
+
 	linear = db_invert_table[i][j];
 
 	return linear;
