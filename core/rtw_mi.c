@@ -477,9 +477,14 @@ static u8 _rtw_mi_process(_adapter *padapter, bool exclude_self,
 {
 	int i;
 	_adapter *iface;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
 
 	u8 ret = 0;
+
+	if (padapter == NULL)
+		return 0;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -500,9 +505,14 @@ static u8 _rtw_mi_process_without_schk(_adapter *padapter, bool exclude_self,
 {
 	int i;
 	_adapter *iface;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
 
 	u8 ret = 0;
+
+	if (padapter == NULL)
+		return 0;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1083,7 +1093,12 @@ u8 rtw_mi_buddy_dequeue_writeport(_adapter *padapter)
 static void _rtw_mi_adapter_reset(_adapter *padapter , u8 exclude_self)
 {
 	int i;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
+
+	if (padapter == NULL)
+		return;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		if (dvobj->padapters[i]) {
@@ -1290,13 +1305,14 @@ u8 rtw_mi_buddy_stay_in_p2p_mode(_adapter *padapter)
 _adapter *rtw_get_iface_by_id(_adapter *padapter, u8 iface_id)
 {
 	_adapter *iface = NULL;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
 
 	if ((padapter == NULL) || (iface_id >= CONFIG_IFACE_NUMBER)) {
 		rtw_warn_on(1);
 		return iface;
 	}
 
+	dvobj = adapter_to_dvobj(padapter);
 	return  dvobj->padapters[iface_id];
 }
 
@@ -1305,7 +1321,12 @@ _adapter *rtw_get_iface_by_macddr(_adapter *padapter, const u8 *mac_addr)
 	int i;
 	_adapter *iface = NULL;
 	u8 bmatch = _FALSE;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
+
+	if (padapter == NULL)
+		return NULL;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1325,7 +1346,12 @@ _adapter *rtw_get_iface_by_hwport(_adapter *padapter, u8 hw_port)
 	int i;
 	_adapter *iface = NULL;
 	u8 bmatch = _FALSE;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
+
+	if (padapter == NULL)
+		return NULL;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1440,11 +1466,18 @@ void rtw_mi_buddy_clone_bcmc_packet(_adapter *padapter, union recv_frame *precvf
 	s32 ret = _SUCCESS;
 	_adapter *iface = NULL;
 	union recv_frame *pcloneframe = NULL;
-	struct recv_priv *precvpriv = &padapter->recvpriv;/*primary_padapter*/
-	_queue *pfree_recv_queue = &precvpriv->free_recv_queue;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct recv_priv *precvpriv;
+	_queue *pfree_recv_queue;
+	struct dvobj_priv *dvobj;
 	u8 *fhead = get_recvframe_data(precvframe);
 	u8 type = GetFrameType(fhead);
+
+	if (padapter == NULL)
+		return;
+
+	precvpriv = &padapter->recvpriv;/*primary_padapter*/
+	pfree_recv_queue = &precvpriv->free_recv_queue;
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1472,9 +1505,14 @@ void rtw_mi_buddy_clone_bcmc_packet(_adapter *padapter, union recv_frame *precvf
 /*API be created temporary for MI, caller is interrupt-handler, PCIE's interrupt handler cannot apply to multi-AP*/
 _adapter *rtw_mi_get_ap_adapter(_adapter *padapter)
 {
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct dvobj_priv *dvobj;
 	int i;
 	_adapter *iface = NULL;
+
+	if (padapter == NULL)
+		return NULL;
+
+	dvobj = adapter_to_dvobj(padapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1492,10 +1530,15 @@ _adapter *rtw_mi_get_ap_adapter(_adapter *padapter)
 
 u8 rtw_mi_get_ld_sta_ifbmp(_adapter *adapter)
 {
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	struct dvobj_priv *dvobj;
 	int i;
 	_adapter *iface = NULL;
 	u8 ifbmp = 0;
+
+	if (adapter == NULL)
+		return 0;
+
+	dvobj = adapter_to_dvobj(adapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1511,10 +1554,15 @@ u8 rtw_mi_get_ld_sta_ifbmp(_adapter *adapter)
 
 u8 rtw_mi_get_ap_mesh_ifbmp(_adapter *adapter)
 {
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	struct dvobj_priv *dvobj;
 	int i;
 	_adapter *iface = NULL;
 	u8 ifbmp = 0;
+
+	if (adapter == NULL)
+		return 0;
+
+	dvobj = adapter_to_dvobj(adapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1532,11 +1580,17 @@ u8 rtw_mi_get_ap_mesh_ifbmp(_adapter *adapter)
 void rtw_mi_update_ap_bmc_camid(_adapter *padapter, u8 camid_a, u8 camid_b)
 {
 #ifdef CONFIG_CONCURRENT_MODE
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
-	struct macid_ctl_t *macid_ctl = dvobj_to_macidctl(dvobj);
+	struct dvobj_priv *dvobj;
+	struct macid_ctl_t *macid_ctl;
 
 	int i;
 	_adapter *iface = NULL;
+
+	if (padapter == NULL)
+		return;
+
+	dvobj = adapter_to_dvobj(padapter);
+	macid_ctl = dvobj_to_macidctl(dvobj);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -1556,10 +1610,15 @@ void rtw_mi_update_ap_bmc_camid(_adapter *padapter, u8 camid_a, u8 camid_b)
 
 u8 rtw_mi_get_assoc_if_num(_adapter *adapter)
 {
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+	struct dvobj_priv *dvobj;
 	u8 n_assoc_iface = 0;
 #if 1
 	u8 i;
+
+	if (adapter == NULL)
+		return 0;
+
+	dvobj = adapter_to_dvobj(adapter);
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		if (check_fwstate(&(dvobj->padapters[i]->mlmepriv), WIFI_ASOC_STATE))
