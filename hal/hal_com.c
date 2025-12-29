@@ -11427,7 +11427,7 @@ s32 rtw_hal_set_wifi_btc_port_id_cmd(_adapter *adapter)
 }
 #endif
 
-#define LPS_ACTIVE_TIMEOUT	10 /*number of times*/
+#define LPS_ACTIVE_TIMEOUT	50 /*number of times*/
 void rtw_lps_state_chk(_adapter *adapter, u8 ps_mode)
 {
 	if (ps_mode == PS_MODE_ACTIVE) {
