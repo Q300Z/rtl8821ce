@@ -10,4 +10,4 @@ rtl8821ce/
 .idea
 build_cache
 build.log
-cppcheck_results.txt
+cppcheck_results.txtbenchmark_results/
