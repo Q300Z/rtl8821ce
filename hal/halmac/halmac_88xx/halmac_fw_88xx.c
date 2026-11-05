@@ -1044,8 +1044,19 @@ send_general_info_88xx(struct halmac_adapter *adapter,
 
 	h2cq_addr = adapter->txff_alloc.rsvd_h2cq_addr;
 	h2cq_addr <<= TX_PAGE_SIZE_SHIFT_88XX;
-	status = dump_fifo_88xx(adapter, HAL_FIFO_SEL_TX,
-				h2cq_addr, 4, h2cq_ele);
+
+	{
+		u32 poll = 0;
+		do {
+			status = dump_fifo_88xx(adapter, HAL_FIFO_SEL_TX,
+						h2cq_addr, 4, h2cq_ele);
+			if (status == HALMAC_RET_SUCCESS &&
+			    (h2cq_ele[0] & 0x7F) == 0x01 && h2cq_ele[1] == 0xFF)
+				break;
+			PLTFM_DELAY_US(100);
+		} while (++poll < 100);
+	}
+
 	if (status != HALMAC_RET_SUCCESS) {
 		PLTFM_MSG_ERR("[ERR]dump h2cq!!\n");
 		return status;

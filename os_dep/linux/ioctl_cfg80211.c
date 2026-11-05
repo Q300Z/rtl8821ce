@@ -4682,11 +4682,13 @@ static int rtw_cfg80211_add_monitor_if(_adapter *padapter, char *name, struct ne
 	mon_wdev->wiphy = padapter->rtw_wdev->wiphy;
 	mon_wdev->netdev = mon_ndev;
 	mon_wdev->iftype = NL80211_IFTYPE_MONITOR;
-	mon_ndev->ieee80211_ptr = mon_wdev;
 
 	ret = register_netdevice(mon_ndev);
 	if (ret)
 		goto out;
+
+	/* Set ieee80211_ptr strictly after registration to avoid recursive wiphy_lock deadlock */
+	mon_ndev->ieee80211_ptr = mon_wdev;
 
 	*ndev = pwdev_priv->pmon_ndev = mon_ndev;
 	_rtw_memcpy(pwdev_priv->ifname_mon, name, IFNAMSIZ + 1);
