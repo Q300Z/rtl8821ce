@@ -10007,7 +10007,15 @@ void rtw_wdev_unregister(struct wireless_dev *wdev)
 
 	if (pwdev_priv->pmon_ndev) {
 		RTW_INFO("%s, unregister monitor interface\n", __func__);
-		unregister_netdev(pwdev_priv->pmon_ndev);
+		if (rtw_rtnl_lock_needed(adapter_to_dvobj(adapter)))
+			unregister_netdev(pwdev_priv->pmon_ndev);
+		else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0))
+			cfg80211_unregister_netdevice(pwdev_priv->pmon_ndev);
+#else
+			unregister_netdevice(pwdev_priv->pmon_ndev);
+#endif
+		pwdev_priv->pmon_ndev = NULL;
 	}
 }
 
