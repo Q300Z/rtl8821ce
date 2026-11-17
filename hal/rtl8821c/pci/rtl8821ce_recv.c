@@ -48,6 +48,7 @@ static u32 rtl8821ce_wait_rxrdy(_adapter *padapter,
 	if (rx_bd == NULL)
 		return _FAIL;
 
+	dma_rmb();
 	total_len = (u2Byte)GET_RX_BD_TOTALRXPKTSIZE(rx_bd);
 	first_seg = (u1Byte)GET_RX_BD_FS(rx_bd);
 	last_seg = (u1Byte)GET_RX_BD_LS(rx_bd);
@@ -182,6 +183,21 @@ static void rtl8821ce_rx_mpdu(_adapter *padapter)
 
 		/* rx packet */
 		skb = r_priv->rx_ring[rx_q_idx].rx_buf[r_priv->rx_ring[rx_q_idx].idx];
+		if (!skb) {
+			SET_RX_BD_RXBUFFSIZE(rx_bd, 0);
+			SET_RX_BD_PHYSICAL_ADDR_LOW(rx_bd, 0);
+#ifdef CONFIG_64BIT_DMA
+			SET_RX_BD_PHYSICAL_ADDR_HIGH(rx_bd, 0);
+#endif
+			wmb();
+			r_priv->rx_ring[rx_q_idx].idx =
+				(r_priv->rx_ring[rx_q_idx].idx + 1) %
+				r_priv->rxringcount;
+			rtw_write16(padapter, REG_RXQ_RXBD_IDX,
+				    r_priv->rx_ring[rx_q_idx].idx);
+			remaing_rxdesc--;
+			continue;
+		}
 
 		buf_desc_debug("RX:%s(%d), rx_bd addr = %x, total_len = %d, ring idx = %d\n",
 			       __func__, __LINE__, (u32)rx_bd,
@@ -263,12 +279,31 @@ static void rtl8821ce_rx_mpdu(_adapter *padapter)
 						       skb_tail_pointer(skb),
 						       r_priv->rxbuffersize,
 						       PCI_DMA_FROMDEVICE);
+				if (pci_dma_mapping_error(pdvobjpriv->ppcidev, *((dma_addr_t *) skb->cb))) {
 					#else
 					dma_map_single(&(pdvobjpriv->ppcidev)->dev,
 						       skb_tail_pointer(skb),
 						       r_priv->rxbuffersize,
 						       DMA_FROM_DEVICE);
+				if (dma_mapping_error(&(pdvobjpriv->ppcidev)->dev, *((dma_addr_t *) skb->cb))) {
 					#endif
+					RTW_ERR("%s: dma_mapping_error\n", __func__);
+					dev_kfree_skb_any(skb);
+					r_priv->rx_ring[rx_q_idx].rx_buf[r_priv->rx_ring[rx_q_idx].idx] = NULL;
+					SET_RX_BD_RXBUFFSIZE(rx_bd, 0);
+					SET_RX_BD_PHYSICAL_ADDR_LOW(rx_bd, 0);
+#ifdef CONFIG_64BIT_DMA
+					SET_RX_BD_PHYSICAL_ADDR_HIGH(rx_bd, 0);
+#endif
+					wmb();
+					r_priv->rx_ring[rx_q_idx].idx =
+						(r_priv->rx_ring[rx_q_idx].idx + 1) %
+						r_priv->rxringcount;
+					rtw_write16(padapter, REG_RXQ_RXBD_IDX,
+						    r_priv->rx_ring[rx_q_idx].idx);
+					remaing_rxdesc--;
+					continue;
+				}
 				goto done;
 			}
 
@@ -290,12 +325,31 @@ static void rtl8821ce_rx_mpdu(_adapter *padapter)
 					       skb_tail_pointer(skb),
 					       r_priv->rxbuffersize,
 					       PCI_DMA_FROMDEVICE);
+			if (pci_dma_mapping_error(pdvobjpriv->ppcidev, *((dma_addr_t *) skb->cb))) {
 				#else
 				dma_map_single(&(pdvobjpriv->ppcidev)->dev,
 					       skb_tail_pointer(skb),
 					       r_priv->rxbuffersize,
 					       DMA_FROM_DEVICE);
+			if (dma_mapping_error(&(pdvobjpriv->ppcidev)->dev, *((dma_addr_t *) skb->cb))) {
 				#endif
+				RTW_ERR("%s: dma_mapping_error\n", __func__);
+				dev_kfree_skb_any(skb);
+				r_priv->rx_ring[rx_q_idx].rx_buf[r_priv->rx_ring[rx_q_idx].idx] = NULL;
+				SET_RX_BD_RXBUFFSIZE(rx_bd, 0);
+				SET_RX_BD_PHYSICAL_ADDR_LOW(rx_bd, 0);
+#ifdef CONFIG_64BIT_DMA
+				SET_RX_BD_PHYSICAL_ADDR_HIGH(rx_bd, 0);
+#endif
+				wmb();
+				r_priv->rx_ring[rx_q_idx].idx =
+					(r_priv->rx_ring[rx_q_idx].idx + 1) %
+					r_priv->rxringcount;
+				rtw_write16(padapter, REG_RXQ_RXBD_IDX,
+					    r_priv->rx_ring[rx_q_idx].idx);
+				remaing_rxdesc--;
+				continue;
+			}
 		}
 done:
 
@@ -305,6 +359,7 @@ done:
 		SET_RX_BD_PHYSICAL_ADDR_HIGH(rx_bd, (*((dma_addr_t *)skb->cb)>>32));
 #endif
 		SET_RX_BD_RXBUFFSIZE(rx_bd, r_priv->rxbuffersize);
+		wmb();
 
 		r_priv->rx_ring[rx_q_idx].idx =
 			(r_priv->rx_ring[rx_q_idx].idx + 1) %
@@ -441,11 +496,19 @@ int rtl8821ce_init_rxbd_ring(_adapter *padapter)
 			*mapping = pci_map_single(pdev, skb_tail_pointer(skb),
 					r_priv->rxbuffersize,
 					PCI_DMA_FROMDEVICE);
+			if (pci_dma_mapping_error(pdev, *mapping)) {
 			#else
 			*mapping = dma_map_single(&pdev->dev, skb_tail_pointer(skb),
 					r_priv->rxbuffersize,
 					DMA_FROM_DEVICE);
+			if (dma_mapping_error(&pdev->dev, *mapping)) {
 			#endif
+				RTW_ERR("%s: dma_mapping_error\n", __func__);
+				dev_kfree_skb_any(skb);
+				r_priv->rx_ring[rx_queue_idx].rx_buf[i] = NULL;
+				rtl8821ce_free_rxbd_ring(padapter);
+				return _FAIL;
+			}
 
 
 			/* Reset FS, LS, Total len */

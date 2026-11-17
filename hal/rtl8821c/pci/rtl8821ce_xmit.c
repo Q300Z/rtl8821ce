@@ -282,8 +282,8 @@ static u16 ffaddr2dma(u32 addr)
  * segment. Designed for tx buffer descriptor architecture
  * Input *pmem: pointer to the Tx Buffer Descriptor
  */
-static void rtl8821ce_update_txbd(struct xmit_frame *pxmitframe,
-				  u8 *txbd, s32 sz)
+static s32 rtl8821ce_update_txbd(struct xmit_frame *pxmitframe,
+				 u8 *txbd, s32 sz)
 {
 	_adapter *padapter = pxmitframe->padapter;
 	struct dvobj_priv *pdvobjpriv = adapter_to_dvobj(padapter);
@@ -298,9 +298,17 @@ static void rtl8821ce_update_txbd(struct xmit_frame *pxmitframe,
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 	mapping = pci_map_single(pdvobjpriv->ppcidev, pxmitframe->buf_addr,
 				 sz + TX_WIFI_INFO_SIZE, PCI_DMA_TODEVICE);
+	if (pci_dma_mapping_error(pdvobjpriv->ppcidev, mapping)) {
+		RTW_ERR("%s: pci_dma_mapping_error\n", __func__);
+		return _FAIL;
+	}
 	#else
 	mapping = dma_map_single(&(pdvobjpriv->ppcidev)->dev, pxmitframe->buf_addr,
 				 sz + TX_WIFI_INFO_SIZE, DMA_TO_DEVICE);
+	if (dma_mapping_error(&(pdvobjpriv->ppcidev)->dev, mapping)) {
+		RTW_ERR("%s: dma_mapping_error\n", __func__);
+		return _FAIL;
+	}
 	#endif
 
 	/* Calculate page size.
@@ -365,6 +373,7 @@ static void rtl8821ce_update_txbd(struct xmit_frame *pxmitframe,
 	buf_desc_debug("TXBD:, 08h(0x%08x)\n", *((u32 *)(txbd + 8)));
 	buf_desc_debug("TXBD:, 12h(0x%08x)\n", *((u32 *)(txbd + 12)));
 
+	return _SUCCESS;
 }
 
 static s32 update_txdesc(struct xmit_frame *pxmitframe, s32 sz)
@@ -682,7 +691,19 @@ s32 rtl8821ce_dump_xframe(_adapter *padapter, struct xmit_frame *pxmitframe)
 		 * It rely on rtl8821ce_update_txbd() to map it into non cache memory
 		 */
 
-		rtl8821ce_update_txbd(pxmitframe, txbd, sz);
+		if (rtl8821ce_update_txbd(pxmitframe, txbd, sz) != _SUCCESS) {
+#ifndef CONFIG_BCN_ICF
+			if (ff_hwaddr == BCN_QUEUE_INX)
+				padapter->xmitpriv.beaconDMAing = _FALSE;
+#endif
+			_exit_critical(&pdvobjpriv->irq_th_lock, &irqL);
+			rtw_sctx_done_err(&pxmitbuf->sctx,
+					  RTW_SCTX_DONE_TX_DESC_NA);
+			rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
+			pxmitbuf = NULL;
+			ret = _FAIL;
+			break;
+		}
 
 		if (pxmitbuf->buf_tag != XMITBUF_CMD)
 			rtl8821ce_enqueue_xmitbuf(ptx_ring, pxmitbuf);
@@ -708,7 +729,7 @@ s32 rtl8821ce_dump_xframe(_adapter *padapter, struct xmit_frame *pxmitframe)
 
 	rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
-	if (ret != _SUCCESS)
+	if (ret != _SUCCESS && pxmitbuf)
 		rtw_sctx_done_err(&pxmitbuf->sctx, RTW_SCTX_DONE_UNKNOWN);
 
 	return ret;
@@ -1548,9 +1569,15 @@ void rtl8821ce_tx_isr(PADAPTER Adapter, int prio)
 		#ifdef CONFIG_64BIT_DMA
 			mapping |= (dma_addr_t)GET_TX_BD_PHYSICAL_ADDR0_HIGH(tx_desc) << 32;
 		#endif
+			#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 			pci_unmap_single(pdvobjpriv->ppcidev,
 				 	mapping,
 					 pxmitbuf->len, PCI_DMA_TODEVICE);
+			#else
+			dma_unmap_single(&(pdvobjpriv->ppcidev)->dev,
+					mapping,
+					pxmitbuf->len, DMA_TO_DEVICE);
+			#endif
 			rtw_sctx_done(&pxmitbuf->sctx);
 			rtw_free_xmitbuf(&(pxmitbuf->padapter->xmitpriv),
 					 pxmitbuf);
