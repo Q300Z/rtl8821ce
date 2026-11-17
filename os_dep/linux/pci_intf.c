@@ -504,7 +504,8 @@ void rtw_pci_disable_aspm(_adapter *padapter)
 	/* When there exists anyone's BusNum, DevNum, and FuncNum that are set to 0xff, */
 	/* we do not execute any action and return. Added by tynli. */
 	if ((pcipriv->busnumber == 0xff && pcipriv->devnumber == 0xff && pcipriv->funcnumber == 0xff) ||
-	    (pcipriv->pcibridge_busnum == 0xff && pcipriv->pcibridge_devnum == 0xff && pcipriv->pcibridge_funcnum == 0xff)) {
+	    (pcipriv->pcibridge_busnum == 0xff && pcipriv->pcibridge_devnum == 0xff && pcipriv->pcibridge_funcnum == 0xff) ||
+	    !bridge_pdev) {
 		/* Do Nothing!! */
 	} else {
 		/* 4  */ /* Disable Pci Bridge ASPM */
@@ -541,7 +542,8 @@ void rtw_pci_enable_aspm(_adapter *padapter)
 	/* When there exists anyone's BusNum, DevNum, and FuncNum that are set to 0xff, */
 	/* we do not execute any action and return. Added by tynli. */
 	if ((pcipriv->busnumber == 0xff && pcipriv->devnumber == 0xff && pcipriv->funcnumber == 0xff) ||
-	    (pcipriv->pcibridge_busnum == 0xff && pcipriv->pcibridge_devnum == 0xff && pcipriv->pcibridge_funcnum == 0xff)) {
+	    (pcipriv->pcibridge_busnum == 0xff && pcipriv->pcibridge_devnum == 0xff && pcipriv->pcibridge_funcnum == 0xff) ||
+	    !bridge_pdev) {
 		RTW_INFO("rtw_pci_enable_aspm(): Fail to enable ASPM. Cannot find the Bus of PCI(Bridge).\n");
 		return;
 	}
@@ -1647,20 +1649,6 @@ static int rtw_pci_resume(struct pci_dev *pdev)
 		goto exit;
 	}
 
-	err = pci_enable_device(pdev);
-	if (err != 0) {
-		RTW_INFO("%s Failed on pci_enable_device (%d)\n", __func__, err);
-		goto exit;
-	}
-
-
-#ifdef CONFIG_WOWLAN
-	err =  pci_enable_wake(pdev, PCI_D0, 0);
-	if (err != 0) {
-		RTW_INFO("%s Failed on pci_enable_wake (%d)\n", __func__, err);
-		goto exit;
-	}
-#endif
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 37))
 	pci_restore_state(pdev);
 #else
@@ -1671,7 +1659,21 @@ static int rtw_pci_resume(struct pci_dev *pdev)
 	}
 #endif
 
+	err = pci_enable_device(pdev);
+	if (err != 0) {
+		RTW_INFO("%s Failed on pci_enable_device (%d)\n", __func__, err);
+		goto exit;
+	}
+
 	pci_set_master(pdev);
+
+#ifdef CONFIG_WOWLAN
+	err =  pci_enable_wake(pdev, PCI_D0, 0);
+	if (err != 0) {
+		RTW_INFO("%s Failed on pci_enable_wake (%d)\n", __func__, err);
+		goto exit;
+	}
+#endif
 
 #ifdef CONFIG_WOWLAN
 	device_set_wakeup_enable(&pdev->dev, false);

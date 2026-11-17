@@ -260,6 +260,7 @@ static VOID rtl8821ce_disable_interrupt(PADAPTER Adapter)
 
 	rtw_write32(Adapter, REG_HIMR0, 0x0);
 	rtw_write32(Adapter, REG_HIMR1, 0x0);	/* by tynli */
+	rtw_write32(Adapter, REG_HIMR3, 0x0);
 	pdvobjpriv->irq_enabled = 0;
 }
 
