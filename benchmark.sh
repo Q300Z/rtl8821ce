@@ -6,9 +6,10 @@
 # ==============================================================================
 
 set -e
+export LC_ALL=C
 
-GATEWAY=$(ip route show default 2>/dev/null | awk '{print $3}' | head -n1)
-IFACE=$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)
+GATEWAY=$(ip route show default 2>/dev/null | awk '/via/ {print $3; exit}')
+IFACE=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
 IFACE=${IFACE:-wlo1}
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 HUMAN_DATE=$(date +"%d/%m/%Y %H:%M:%S")
@@ -29,12 +30,13 @@ KERNEL_VER=$(uname -r)
 MODULE_VER=$(modinfo 8821ce 2>/dev/null | grep -E "^version:" | awk '{$1=""; print $0}' | xargs || echo "N/A")
 SRC_VER=$(cat /sys/module/8821ce/srcversion 2>/dev/null || echo "Inconnu")
 
-NM_INFO=$(nmcli -t -f active,ssid,bssid,chan,freq,signal dev wifi 2>/dev/null | grep '^yes:' || true)
+NM_INFO=$(nmcli -t -f active,ssid,bssid,chan,signal dev wifi 2>/dev/null | grep '^yes:' | head -n1 || true)
 if [ -n "$NM_INFO" ]; then
-    SSID=$(echo "$NM_INFO" | cut -d':' -f2)
-    BSSID=$(echo "$NM_INFO" | cut -d':' -f3-8)
-    CHAN=$(echo "$NM_INFO" | cut -d':' -f9)
-    SIGNAL="$(echo "$NM_INFO" | cut -d':' -f10) %"
+    NM_SAFE=$(echo "$NM_INFO" | sed 's/\\:/\x01/g')
+    SSID=$(echo "$NM_SAFE" | cut -d':' -f2 | tr '\001' ':')
+    BSSID=$(echo "$NM_SAFE" | cut -d':' -f3 | tr '\001' ':')
+    CHAN=$(echo "$NM_SAFE" | cut -d':' -f4)
+    SIGNAL="$(echo "$NM_SAFE" | cut -d':' -f5) %"
 else
     SSID="Non détecté"
     BSSID="N/A"
@@ -44,9 +46,15 @@ fi
 
 # 2. Test de Latence & Gigue Locale vers la box
 echo -n "[1/4] Mesure de la latence locale (50 pings)... "
-PING_RAW=$(ping -c 50 -i 0.1 "$GATEWAY" 2>&1)
-LOSS=$(echo "$PING_RAW" | grep -oP '\d+(?=% packet loss)')
-RTT_LINE=$(echo "$PING_RAW" | grep -E "rtt|round-trip" || echo "")
+if [ -n "$GATEWAY" ]; then
+    PING_RAW=$(ping -c 50 -i 0.1 "$GATEWAY" 2>&1 || true)
+    LOSS=$(echo "$PING_RAW" | grep -oP '\d+(?=% packet loss)' | head -n1 || true)
+    LOSS=${LOSS:-100}
+    RTT_LINE=$(echo "$PING_RAW" | grep -E "rtt|round-trip" | head -n1 || true)
+else
+    LOSS="100"
+    RTT_LINE=""
+fi
 
 if [ -n "$RTT_LINE" ]; then
     RTT_MIN=$(echo "$RTT_LINE" | awk -F'/' '{print $4}' | awk '{print $NF}')
@@ -60,16 +68,17 @@ echo "OK (${RTT_AVG} ms avg, ${LOSS}% perte)"
 
 # 3. Mesure des Interruptions Matérielles au repos
 echo -n "[2/4] Mesure des interruptions matérielles... "
-IRQ_BEFORE=$(grep -i "8821" /proc/interrupts 2>/dev/null | awk '{sum=0; for(i=2; i<=NF-2; i++) sum+=$i; print sum}' || echo 0)
+IRQ_BEFORE=$(awk '/8821/ {for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) sum+=$i} END {print sum+0}' /proc/interrupts 2>/dev/null)
 sleep 1
-IRQ_AFTER=$(grep -i "8821" /proc/interrupts 2>/dev/null | awk '{sum=0; for(i=2; i<=NF-2; i++) sum+=$i; print sum}' || echo 0)
+IRQ_AFTER=$(awk '/8821/ {for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) sum+=$i} END {print sum+0}' /proc/interrupts 2>/dev/null)
 IRQ_IDLE_DIFF=$((IRQ_AFTER - IRQ_BEFORE))
 echo "OK ($IRQ_IDLE_DIFF irq/s au repos)"
 
 # 4. Test de Débit Download Réel (Throughput sur 8 secondes)
 echo -n "[3/4] Mesure du débit de téléchargement... "
-DOWNLOAD_SPEED_BYTES=$(curl -o /dev/null -s -w '%{speed_download}' --max-time 8 "$TEST_URL" 2>/dev/null || echo 0)
-SPEED_MBPS=$(awk "BEGIN {printf \"%.2f\", ($DOWNLOAD_SPEED_BYTES * 8) / 1000000}")
+DOWNLOAD_SPEED_BYTES=$(curl -o /dev/null -s -w '%{speed_download}\n' --max-time 8 "$TEST_URL" 2>/dev/null | tail -n1 || true)
+DOWNLOAD_SPEED_BYTES=${DOWNLOAD_SPEED_BYTES:-0}
+SPEED_MBPS=$(awk -v b="$DOWNLOAD_SPEED_BYTES" 'BEGIN {printf "%.2f", (b * 8) / 1000000}')
 echo "OK ($SPEED_MBPS Mbit/s)"
 
 # 5. Mesure CPU des threads du pilote (RTW_CMD_THREAD)
@@ -108,10 +117,10 @@ cat <<EOF > "$OUTPUT_FILE"
 | Métrique | Résultat | Appréciation |
 |---|---|---|
 | **Latence Minimale** | \`${RTT_MIN} ms\` | - |
-| **Latence Moyenne** | \`${RTT_AVG} ms\` | $(awk "BEGIN {if ($RTT_AVG < 5) print \"Excellente (< 5ms)\"; else if ($RTT_AVG < 15) print \"Bonne (< 15ms)\"; else print \"Élevée (> 15ms)\"}") |
+| **Latence Moyenne** | \`${RTT_AVG} ms\` | $(if [ "$RTT_AVG" = "N/A" ]; then echo "Indisponible"; else awk -v v="$RTT_AVG" 'BEGIN {if (v < 5) print "Excellente (< 5ms)"; else if (v < 15) print "Bonne (< 15ms)"; else print "Élevée (> 15ms)"}'; fi) |
 | **Latence Maximale** | \`${RTT_MAX} ms\` | - |
-| **Gigue (Jitter / mdev)** | \`${RTT_MDEV} ms\` | $(awk "BEGIN {if ($RTT_MDEV < 3) print \"Très stable (< 3ms)\"; else print \"Fluctuante (> 3ms)\"}") |
-| **Perte de Paquets** | \`${LOSS}%\` | $([ "$LOSS" -eq 0 ] && echo "Parfait (0%)" || echo "Anomalie (> 0%)") |
+| **Gigue (Jitter / mdev)** | \`${RTT_MDEV} ms\` | $(if [ "$RTT_MDEV" = "N/A" ]; then echo "Indisponible"; else awk -v v="$RTT_MDEV" 'BEGIN {if (v < 3) print "Très stable (< 3ms)"; else print "Fluctuante (> 3ms)"}'; fi) |
+| **Perte de Paquets** | \`${LOSS}%\` | $([ "${LOSS:-100}" -eq 0 ] 2>/dev/null && echo "Parfait (0%)" || echo "Anomalie (> 0%)") |
 | **Débit Réel Mesuré** | \`${SPEED_MBPS} Mbit/s\` | - |
 
 ---
