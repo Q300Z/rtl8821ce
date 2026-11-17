@@ -220,10 +220,12 @@ void fill_txbd_own(_adapter *padapter, u8 *txbd, u16 queue_idx,
 	if (queue_idx == BCN_QUEUE_INX) {
 
 		SET_TX_BD_OWN(txbd, 1);
+		wmb(); /* Guarantee descriptor OWN bit is visible in RAM before MMIO kickstart */
 
 		/* kick start */
 		rtw_write8(padapter, REG_RX_RXBD_NUM + 1,
-		rtw_read8(padapter, REG_RX_RXBD_NUM + 1) | BIT(4));
+			rtw_read8(padapter, REG_RX_RXBD_NUM + 1) | BIT(4));
+		rtw_read8(padapter, REG_RX_RXBD_NUM + 1); /* Flush PCIe posted write buffer */
 
 		return;
 	}
@@ -315,6 +317,7 @@ static void rtl8821ce_update_txbd(struct xmit_frame *pxmitframe,
 	 * Reset all tx buffer desciprtor content
 	 * -- Reset first element
 	 */
+	_rtw_memset(txbd, 0, sizeof(struct tx_buf_desc));
 	SET_TX_BD_TX_BUFF_SIZE0(txbd, 0);
 	SET_TX_BD_PSB(txbd, 0);
 	SET_TX_BD_OWN(txbd, 0);

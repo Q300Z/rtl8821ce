@@ -1671,6 +1671,8 @@ static int rtw_pci_resume(struct pci_dev *pdev)
 	}
 #endif
 
+	pci_set_master(pdev);
+
 #ifdef CONFIG_WOWLAN
 	device_set_wakeup_enable(&pdev->dev, false);
 #endif
