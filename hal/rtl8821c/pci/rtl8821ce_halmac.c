@@ -47,9 +47,17 @@ static u8 pci_write_port_not_xmitframe(void *d,  u32 size, u8 *pBuf, u8 qsel)
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 	mapping = pci_map_single(pdev, pBuf,
 		size+TX_WIFI_INFO_SIZE, PCI_DMA_TODEVICE);
+	if (pci_dma_mapping_error(pdev, mapping)) {
+		RTW_ERR("%s: pci_dma_mapping_error\n", __func__);
+		return _FALSE;
+	}
 	#else
 	mapping = dma_map_single(&pdev->dev, pBuf,
 		size+TX_WIFI_INFO_SIZE, DMA_TO_DEVICE);
+	if (dma_mapping_error(&pdev->dev, mapping)) {
+		RTW_ERR("%s: dma_mapping_error\n", __func__);
+		return _FALSE;
+	}
 	#endif
 
 
@@ -73,10 +81,10 @@ static u8 pci_write_port_not_xmitframe(void *d,  u32 size, u8 *pBuf, u8 qsel)
 	if (!txbd) {
 		#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 		pci_unmap_single(pdev, mapping,
-			size + TX_WIFI_INFO_SIZE, PCI_DMA_FROMDEVICE);
+			size + TX_WIFI_INFO_SIZE, PCI_DMA_TODEVICE);
 		#else
 		dma_unmap_single(&pdev->dev, mapping,
-			size + TX_WIFI_INFO_SIZE, DMA_FROM_DEVICE);
+			size + TX_WIFI_INFO_SIZE, DMA_TO_DEVICE);
 		#endif
 
 		return _FALSE;
@@ -144,6 +152,7 @@ static u8 pci_write_port_not_xmitframe(void *d,  u32 size, u8 *pBuf, u8 qsel)
 	else {
 		/* fill_txbd_own*/
 		SET_TX_BD_OWN(txbd, 1);
+		wmb();
 		/* kick start */
 		rtw_write8(padapter, REG_RX_RXBD_NUM + 1,
 			rtw_read8(padapter, REG_RX_RXBD_NUM + 1) | BIT(4));
@@ -159,10 +168,10 @@ static u8 pci_write_port_not_xmitframe(void *d,  u32 size, u8 *pBuf, u8 qsel)
 
 	#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 	pci_unmap_single(pdev, mapping,
-			size + TX_WIFI_INFO_SIZE,	 PCI_DMA_FROMDEVICE);
+			size + TX_WIFI_INFO_SIZE, PCI_DMA_TODEVICE);
 	#else
 	dma_unmap_single(&pdev->dev, mapping,
-			size + TX_WIFI_INFO_SIZE,	 DMA_FROM_DEVICE);
+			size + TX_WIFI_INFO_SIZE, DMA_TO_DEVICE);
 	#endif
 
 	return ret;
