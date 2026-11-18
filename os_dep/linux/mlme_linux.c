@@ -105,6 +105,12 @@ void rtw_reset_securitypriv(_adapter *adapter)
 
 	_enter_critical_bh(&adapter->security_key_mutex, &irqL);
 
+	/* Ne pas écraser une nouvelle connexion déjà engagée (ex. RESET_SECURITYPRIV asynchrone) */
+	if (check_fwstate(&adapter->mlmepriv, _FW_UNDER_LINKING) == _TRUE) {
+		_exit_critical_bh(&adapter->security_key_mutex, &irqL);
+		return;
+	}
+
 	if (adapter->securitypriv.dot11AuthAlgrthm == dot11AuthAlgrthm_8021X) { /* 802.1x */
 		/* Added by Albert 2009/02/18 */
 		/* We have to backup the PMK information for WiFi PMK Caching test item. */

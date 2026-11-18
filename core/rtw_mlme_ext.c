@@ -1887,6 +1887,11 @@ unsigned int OnBeacon(_adapter *padapter, union recv_frame *precv_frame)
 #endif /* CONFIG_P2P CONFIG_P2P and CONFIG_CONCURRENT_MODE */
 
 			/* start auth */
+			if (pmlmeext->join_abort) {
+				pmlmeinfo->state = WIFI_FW_NULL_STATE;
+				report_join_res(padapter, -4, WLAN_STATUS_UNSPECIFIED_FAILURE);
+				return _SUCCESS;
+			}
 			start_clnt_auth(padapter);
 
 			return _SUCCESS;
@@ -2075,6 +2080,17 @@ unsigned int OnAuth(_adapter *padapter, union recv_frame *precv_frame)
 	seq	= le16_to_cpu(*(u16 *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset + 2));
 
 	RTW_INFO("auth alg=%x, seq=%X\n", algorithm, seq);
+
+#if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	/* AP mode SAE : déléguer à hostapd via cfg80211_rx_mgmt */
+	if (algorithm == 3 && padapter->rtw_wdev) {
+		int freq = rtw_ch2freq(pmlmeext->cur_channel);
+
+		if (freq > 0)
+			rtw_cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, pframe, len, GFP_ATOMIC);
+		return _SUCCESS;
+	}
+#endif
 
 	if (rtw_ap_linking_test_force_auth_fail()) {
 		status = rtw_ap_linking_test_force_auth_fail();
@@ -2303,12 +2319,14 @@ unsigned int OnAuthClient(_adapter *padapter, union recv_frame *precv_frame)
 	status	= le16_to_cpu(*(unsigned short *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset + 4));
 
 #if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
-	/* SAE (WPA3-Personal) : déléguer la trame Auth à wpa_supplicant */
-	if (algthm == 3 && padapter->securitypriv.rsn_akm_suite_type == 8) {
-		int freq = rtw_ch2freq(pmlmeext->cur_channel);
+	/* SAE (WPA3-Personal) : déléguer la trame Auth à wpa_supplicant et bloquer tout fallback Open/Shared */
+	if (padapter->securitypriv.rsn_akm_suite_type == 8) {
+		if (algthm == 3 && padapter->rtw_wdev) {
+			int freq = rtw_ch2freq(pmlmeext->cur_channel);
 
-		if (freq > 0)
-			rtw_cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, pframe, pkt_len, GFP_ATOMIC);
+			if (freq > 0)
+				rtw_cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, pframe, pkt_len, GFP_ATOMIC);
+		}
 		return _SUCCESS;
 	}
 #endif
@@ -11254,12 +11272,13 @@ void start_clnt_auth(_adapter *padapter)
 #if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
 	if (padapter->securitypriv.rsn_akm_suite_type == 8) {
 		RTW_PRINT("start sae external auth\n");
+		/* Armer le timer avant d'émettre l'événement netlink pour éviter toute course avec la réponse */
+		set_link_timer(pmlmeext, REAUTH_TO * 10);
 		if (rtw_cfg80211_indicate_external_auth(padapter) < 0) {
+			_cancel_timer_ex(&pmlmeext->link_timer);
 			pmlmeinfo->state = WIFI_FW_NULL_STATE;
 			report_join_res(padapter, -1, WLAN_STATUS_UNSPECIFIED_FAILURE);
-			return;
 		}
-		set_link_timer(pmlmeext, REAUTH_TO * 10);
 		return;
 	}
 #endif

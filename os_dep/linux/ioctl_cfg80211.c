@@ -7455,8 +7455,6 @@ dump:
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
 		cfg80211_action_tx_status(ndev, *cookie, buf, len, tx_ret == _SUCCESS, GFP_KERNEL);
 #endif
-		if (tx_ret != _SUCCESS)
-			ret = -EIO;
 	}
 
 #ifdef CONFIG_P2P
@@ -9771,14 +9769,19 @@ int rtw_cfg80211_indicate_external_auth(_adapter *padapter)
 	struct net_device *ndev = padapter->pnetdev;
 	struct mlme_ext_info *pmlmeinfo = &padapter->mlmeextpriv.mlmext_info;
 	struct cfg80211_external_auth_params params;
+	u32 ssid_len;
+
+	if (!ndev)
+		return -ENODEV;
 
 	_rtw_memset(&params, 0, sizeof(params));
 	params.action = NL80211_EXTERNAL_AUTH_START;
 	_rtw_memcpy(params.bssid, pmlmeinfo->network.MacAddress, ETH_ALEN);
-	params.ssid.ssid_len = pmlmeinfo->network.Ssid.SsidLength;
-	if (params.ssid.ssid_len > IEEE80211_MAX_SSID_LEN)
-		params.ssid.ssid_len = IEEE80211_MAX_SSID_LEN;
-	_rtw_memcpy(params.ssid.ssid, pmlmeinfo->network.Ssid.Ssid, params.ssid.ssid_len);
+	ssid_len = pmlmeinfo->network.Ssid.SsidLength;
+	if (ssid_len > IEEE80211_MAX_SSID_LEN)
+		ssid_len = IEEE80211_MAX_SSID_LEN;
+	params.ssid.ssid_len = (u8)ssid_len;
+	_rtw_memcpy(params.ssid.ssid, pmlmeinfo->network.Ssid.Ssid, ssid_len);
 	params.key_mgmt_suite = WLAN_AKM_SUITE_SAE;
 
 	return cfg80211_external_auth_request(ndev, &params, GFP_ATOMIC);
