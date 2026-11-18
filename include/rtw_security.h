@@ -164,6 +164,9 @@ struct security_priv {
 	u8 wps_ie[MAX_WPS_IE_LEN];/* added in assoc req */
 	int wps_ie_len;
 
+	u8 owe_dh_ie[258]; /* IE OWE Diffie-Hellman ajouté dans assoc req */
+	int owe_dh_ie_len;
+
 
 	u8	binstallGrpkey;
 #ifdef CONFIG_GTK_OL

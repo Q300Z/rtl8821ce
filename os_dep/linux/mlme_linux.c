@@ -141,6 +141,8 @@ void rtw_reset_securitypriv(_adapter *adapter)
 
 		psec_priv->dot118021XGrpPrivacy = _NO_PRIVACY_;
 		psec_priv->dot118021XGrpKeyid = 1;
+		psec_priv->owe_dh_ie_len = 0;
+		psec_priv->rsn_akm_suite_type = 0;
 
 		psec_priv->ndisauthtype = Ndis802_11AuthModeOpen;
 		psec_priv->ndisencryptstatus = Ndis802_11WEPDisabled;

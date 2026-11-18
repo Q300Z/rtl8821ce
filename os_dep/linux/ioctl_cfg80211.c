@@ -79,6 +79,16 @@
 #define WLAN_AKM_SUITE_FT_PSK			0x000FAC04
 #endif
 
+#ifndef WLAN_AKM_SUITE_OWE
+#define WLAN_AKM_SUITE_OWE              0x000FAC12
+#endif
+#ifndef WLAN_EID_EXTENSION
+#define WLAN_EID_EXTENSION              255
+#endif
+#ifndef WLAN_EID_EXT_OWE_DH_PARAM
+#define WLAN_EID_EXT_OWE_DH_PARAM       32
+#endif
+
 /*
  * In the current design of Wi-Fi driver, it will return success to the system (e.g. supplicant)
  * when Wi-Fi driver decides to abort the scan request in the scan flow by default.
@@ -3318,6 +3328,12 @@ static int rtw_cfg80211_set_auth_type(struct security_priv *psecuritypriv,
 
 
 		break;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	case NL80211_AUTHTYPE_SAE:
+		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
+		psecuritypriv->rsn_akm_suite_type = 8;
+		break;
+#endif
 	default:
 		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_Open;
 		/* return -ENOTSUPP; */
@@ -3400,6 +3416,20 @@ static int rtw_cfg80211_set_key_mgt(struct security_priv *psecuritypriv, u32 key
 	} else if (key_mgt == WLAN_AKM_SUITE_PSK) {
 		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
 		psecuritypriv->rsn_akm_suite_type = 2;
+	} else if (key_mgt == WLAN_AKM_SUITE_OWE) {
+		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
+		psecuritypriv->rsn_akm_suite_type = 18;
+	} else if (key_mgt == WLAN_AKM_SUITE_8021X_SHA256) {
+		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
+		psecuritypriv->rsn_akm_suite_type = 5;
+	} else if (key_mgt == WLAN_AKM_SUITE_PSK_SHA256) {
+		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
+		psecuritypriv->rsn_akm_suite_type = 6;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	} else if (key_mgt == WLAN_AKM_SUITE_SAE) {
+		psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
+		psecuritypriv->rsn_akm_suite_type = 8;
+#endif
 	}
 #ifdef CONFIG_WAPI_SUPPORT
 	else if (key_mgt == WLAN_AKM_SUITE_WAPI_PSK)
@@ -3438,6 +3468,7 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 	if (pie == NULL || !ielen) {
 		/* Treat this as normal case, but need to clear WIFI_UNDER_WPS */
 		_clr_fwstate_(&padapter->mlmepriv, WIFI_UNDER_WPS);
+		padapter->securitypriv.owe_dh_ie_len = 0;
 		goto exit;
 	}
 
@@ -3458,10 +3489,8 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 	RTW_INFO_DUMP(NULL, buf, ielen);
 
 	pos = buf;
-	if (ielen < RSN_HEADER_LEN) {
-		ret  = -1;
-		goto exit;
-	}
+	if (ielen < RSN_HEADER_LEN)
+		goto parse_other_ies;
 
 	pwpa = rtw_get_wpa_ie(buf, &wpa_ielen, ielen);
 	if (pwpa && wpa_ielen > 0) {
@@ -3543,6 +3572,7 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 	}
 	padapter->securitypriv.mfp_opt = mfp_opt;
 
+parse_other_ies:
 	{/* handle wps_ie */
 		uint wps_ielen;
 		u8 *wps_ie;
@@ -3555,6 +3585,32 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 			set_fwstate(&padapter->mlmepriv, WIFI_UNDER_WPS);
 		} else
 			_clr_fwstate_(&padapter->mlmepriv, WIFI_UNDER_WPS);
+	}
+
+	{ /* Extraction de l'IE Diffie-Hellman OWE (EID=255, ExtID=32) si présent */
+		size_t offset = 0;
+
+		padapter->securitypriv.owe_dh_ie_len = 0;
+		while (offset + 2 <= ielen) {
+			u8 eid = buf[offset];
+			u8 elen = buf[offset + 1];
+
+			if (offset + 2 + elen > ielen)
+				break;
+
+			if (eid == WLAN_EID_EXTENSION && elen >= 3 &&
+			    buf[offset + 2] == WLAN_EID_EXT_OWE_DH_PARAM) {
+				size_t total_len = 2 + (size_t)elen;
+
+				if (total_len <= sizeof(padapter->securitypriv.owe_dh_ie)) {
+					_rtw_memcpy(padapter->securitypriv.owe_dh_ie, &buf[offset], total_len);
+					padapter->securitypriv.owe_dh_ie_len = (int)total_len;
+					RTW_INFO("got owe_dh_ie, len:%zu\n", total_len);
+				}
+				break;
+			}
+			offset += 2 + elen;
+		}
 	}
 
 	#ifdef CONFIG_P2P
@@ -3680,6 +3736,7 @@ static int cfg80211_rtw_join_ibss(struct wiphy *wiphy, struct net_device *ndev,
 	psecuritypriv->dot118021XGrpPrivacy = _NO_PRIVACY_;
 	psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_Open; /* open system */
 	psecuritypriv->ndisauthtype = Ndis802_11AuthModeOpen;
+	psecuritypriv->rsn_akm_suite_type = 0;
 
 	ret = rtw_cfg80211_set_auth_type(psecuritypriv, NL80211_AUTHTYPE_OPEN_SYSTEM);
 	rtw_set_802_11_authentication_mode(padapter, psecuritypriv->ndisauthtype);
@@ -3877,6 +3934,7 @@ static int cfg80211_rtw_connect(struct wiphy *wiphy, struct net_device *ndev,
 	psecuritypriv->dot118021XGrpPrivacy = _NO_PRIVACY_;
 	psecuritypriv->dot11AuthAlgrthm = dot11AuthAlgrthm_Open; /* open system */
 	psecuritypriv->ndisauthtype = Ndis802_11AuthModeOpen;
+	psecuritypriv->rsn_akm_suite_type = 0;
 
 #ifdef CONFIG_WAPI_SUPPORT
 	padapter->wapiInfo.bWapiEnable = false;
@@ -7293,14 +7351,17 @@ static int cfg80211_rtw_mgmt_tx(struct wiphy *wiphy,
 	);
 #endif /* CONFIG_DEBUG_CFG80211 */
 
-	/* indicate ack before issue frame to avoid racing with rsp frame */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
-	rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, ack, GFP_KERNEL);
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
-	cfg80211_action_tx_status(ndev, *cookie, buf, len, ack, GFP_KERNEL);
-#endif
-
 	frame_styp = le16_to_cpu(((struct rtw_ieee80211_hdr_3addr *)buf)->frame_ctl) & IEEE80211_FCTL_STYPE;
+
+	/* indicate ack before issue frame to avoid racing with rsp frame (sauf Auth SAE) */
+	if (frame_styp != RTW_IEEE80211_STYPE_AUTH) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+		rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, ack, GFP_KERNEL);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
+		cfg80211_action_tx_status(ndev, *cookie, buf, len, ack, GFP_KERNEL);
+#endif
+	}
+
 	if (IEEE80211_STYPE_PROBE_RESP == frame_styp) {
 #ifdef CONFIG_DEBUG_CFG80211
 		RTW_INFO("RTW_Tx: probe_resp tx_ch=%d, no_cck=%u, da="MAC_FMT"\n", tx_ch, no_cck, MAC_ARG(GetAddr1Ptr(buf)));
@@ -7308,11 +7369,13 @@ static int cfg80211_rtw_mgmt_tx(struct wiphy *wiphy,
 		wait_ack = 0;
 		goto dump;
 	}
-#ifdef CONFIG_RTW_MESH
+#if defined(CONFIG_RTW_MESH) || (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
 	else if (frame_styp == RTW_IEEE80211_STYPE_AUTH) {
 		RTW_INFO("RTW_Tx:tx_ch=%d, no_cck=%u, da="MAC_FMT"\n", tx_ch, no_cck, MAC_ARG(GetAddr1Ptr(buf)));
+#ifdef CONFIG_RTW_MESH
 		if (!rtw_sae_check_frames(padapter, buf, len, _TRUE))
 			RTW_INFO("RTW_Tx:AUTH\n");
+#endif
 		dump_limit = 1;
 		goto dump;
 	}
@@ -7384,6 +7447,16 @@ dump:
 	if (tx_ret != _SUCCESS || dump_cnt > 1) {
 		RTW_INFO(FUNC_ADPT_FMT" %s (%d/%d) in %d ms\n", FUNC_ADPT_ARG(padapter),
 			tx_ret == _SUCCESS ? "OK" : "FAIL", dump_cnt, dump_limit, rtw_get_passing_time_ms(start));
+	}
+
+	if (frame_styp == RTW_IEEE80211_STYPE_AUTH) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+		rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, tx_ret == _SUCCESS, GFP_KERNEL);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
+		cfg80211_action_tx_status(ndev, *cookie, buf, len, tx_ret == _SUCCESS, GFP_KERNEL);
+#endif
+		if (tx_ret != _SUCCESS)
+			ret = -EIO;
 	}
 
 #ifdef CONFIG_P2P
@@ -9515,6 +9588,10 @@ static void rtw_cfg80211_preinit_wiphy(_adapter *adapter, struct wiphy *wiphy)
 		;
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0)) */
 #endif /* CONFIG_RTW_MESH */
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	wiphy->features |= NL80211_FEATURE_SAE;
+#endif
 }
 
 #ifdef CONFIG_RFKILL_POLL
@@ -9688,6 +9765,63 @@ int rtw_hostapd_acs_dump_survey(struct wiphy *wiphy, struct net_device *netdev, 
 }
 #endif /* defined(CONFIG_RTW_HOSTAPD_ACS) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33)) */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+int rtw_cfg80211_indicate_external_auth(_adapter *padapter)
+{
+	struct net_device *ndev = padapter->pnetdev;
+	struct mlme_ext_info *pmlmeinfo = &padapter->mlmeextpriv.mlmext_info;
+	struct cfg80211_external_auth_params params;
+
+	_rtw_memset(&params, 0, sizeof(params));
+	params.action = NL80211_EXTERNAL_AUTH_START;
+	_rtw_memcpy(params.bssid, pmlmeinfo->network.MacAddress, ETH_ALEN);
+	params.ssid.ssid_len = pmlmeinfo->network.Ssid.SsidLength;
+	if (params.ssid.ssid_len > IEEE80211_MAX_SSID_LEN)
+		params.ssid.ssid_len = IEEE80211_MAX_SSID_LEN;
+	_rtw_memcpy(params.ssid.ssid, pmlmeinfo->network.Ssid.Ssid, params.ssid.ssid_len);
+	params.key_mgmt_suite = WLAN_AKM_SUITE_SAE;
+
+	return cfg80211_external_auth_request(ndev, &params, GFP_ATOMIC);
+}
+
+static int cfg80211_rtw_external_auth(struct wiphy *wiphy,
+				      struct net_device *dev,
+				      struct cfg80211_external_auth_params *params)
+{
+	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
+	struct mlme_ext_info *pmlmeinfo = &pmlmeext->mlmext_info;
+
+	RTW_INFO(FUNC_ADPT_FMT" action=%d status=%u\n",
+		 FUNC_ADPT_ARG(padapter), params->action, params->status);
+
+	if (padapter->securitypriv.rsn_akm_suite_type != 8)
+		return -EINVAL;
+
+	if (!_rtw_memcmp(params->bssid, pmlmeinfo->network.MacAddress, ETH_ALEN))
+		return -EINVAL;
+
+	/* Synchronise avec link_timer_hdl (softirq) avant de lire/modifier state */
+	_cancel_timer_ex(&pmlmeext->link_timer);
+
+	if (!(pmlmeinfo->state & WIFI_FW_AUTH_STATE) || pmlmeext->join_abort)
+		return 0;
+
+	if (params->action != NL80211_EXTERNAL_AUTH_ABORT &&
+	    params->status == WLAN_STATUS_SUCCESS) {
+		start_clnt_assoc(padapter);
+	} else {
+		u16 fail_status = params->status ? params->status : WLAN_STATUS_UNSPECIFIED_FAILURE;
+
+		pmlmeinfo->state = WIFI_FW_NULL_STATE;
+		pmlmeinfo->auth_status = 0;
+		report_join_res(padapter, -1, fail_status);
+	}
+
+	return 0;
+}
+#endif
+
 static struct cfg80211_ops rtw_cfg80211_ops = {
 	.change_virtual_intf = cfg80211_rtw_change_iface,
 	.add_key = cfg80211_rtw_add_key,
@@ -9806,6 +9940,10 @@ static struct cfg80211_ops rtw_cfg80211_ops = {
 #ifdef CONFIG_RFKILL_POLL
 	.rfkill_poll = cfg80211_rtw_rfkill_poll,
 #endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	.external_auth = cfg80211_rtw_external_auth,
+#endif
+
 #if defined(CONFIG_RTW_HOSTAPD_ACS) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 33))
 	.dump_survey = rtw_hostapd_acs_dump_survey,
 #endif

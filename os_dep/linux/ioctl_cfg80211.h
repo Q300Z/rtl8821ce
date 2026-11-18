@@ -332,6 +332,10 @@ void rtw_cfg80211_init_rfkill(struct wiphy *wiphy);
 void rtw_cfg80211_deinit_rfkill(struct wiphy *wiphy);
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+int rtw_cfg80211_indicate_external_auth(_adapter *padapter);
+#endif
+
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 4, 0))  && !defined(COMPAT_KERNEL_RELEASE)
 #define rtw_cfg80211_rx_mgmt(wdev, freq, sig_dbm, buf, len, gfp) cfg80211_rx_mgmt(wdev_to_ndev(wdev), freq, buf, len, gfp)
 #elif (LINUX_VERSION_CODE < KERNEL_VERSION(3, 6, 0))

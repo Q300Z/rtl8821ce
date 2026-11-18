@@ -2281,17 +2281,37 @@ unsigned int OnAuthClient(_adapter *padapter, union recv_frame *precv_frame)
 	RTW_INFO("%s\n", __FUNCTION__);
 
 	/* check A1 matches or not */
+	if (pkt_len < WLAN_HDR_A3_LEN)
+		return _SUCCESS;
+
 	if (!_rtw_memcmp(adapter_mac_addr(padapter), get_da(pframe), ETH_ALEN))
+		return _SUCCESS;
+
+	if (!_rtw_memcmp(get_my_bssid(&pmlmeinfo->network), get_ta(pframe), ETH_ALEN) ||
+	    !_rtw_memcmp(get_my_bssid(&pmlmeinfo->network), get_hdr_bssid(pframe), ETH_ALEN))
 		return _SUCCESS;
 
 	if (!(pmlmeinfo->state & WIFI_FW_AUTH_STATE) || pmlmeext->join_abort)
 		return _SUCCESS;
 
 	offset = (GetPrivacy(pframe)) ? 4 : 0;
+	if (pkt_len < WLAN_HDR_A3_LEN + offset + 6)
+		return _SUCCESS;
 
 	algthm	= le16_to_cpu(*(unsigned short *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset));
 	seq	= le16_to_cpu(*(unsigned short *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset + 2));
 	status	= le16_to_cpu(*(unsigned short *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset + 4));
+
+#if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	/* SAE (WPA3-Personal) : déléguer la trame Auth à wpa_supplicant */
+	if (algthm == 3 && padapter->securitypriv.rsn_akm_suite_type == 8) {
+		int freq = rtw_ch2freq(pmlmeext->cur_channel);
+
+		if (freq > 0)
+			rtw_cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, pframe, pkt_len, GFP_ATOMIC);
+		return _SUCCESS;
+	}
+#endif
 
 	if (status != 0) {
 		RTW_INFO("clnt auth fail, status: %d\n", status);
@@ -9267,6 +9287,15 @@ void _issue_assocreq(_adapter *padapter, u8 is_reassoc)
 	rtw_ft_build_assoc_req_ies(padapter, is_reassoc, pattrib, &pframe);
 #endif
 
+	/* Ajout de l'IE Diffie-Hellman OWE s'il a été fourni par wpa_supplicant */
+	if (padapter->securitypriv.owe_dh_ie_len > 0 &&
+	    padapter->securitypriv.owe_dh_ie_len <= sizeof(padapter->securitypriv.owe_dh_ie) &&
+	    TXDESC_OFFSET + pattrib->pktlen + padapter->securitypriv.owe_dh_ie_len <= MAX_XMIT_EXTBUF_SZ) {
+		_rtw_memcpy(pframe, padapter->securitypriv.owe_dh_ie, padapter->securitypriv.owe_dh_ie_len);
+		pframe += padapter->securitypriv.owe_dh_ie_len;
+		pattrib->pktlen += padapter->securitypriv.owe_dh_ie_len;
+	}
+
 	pattrib->last_txcmdsz = pattrib->pktlen;
 	dump_mgntframe(padapter, pmgntframe);
 
@@ -11222,6 +11251,19 @@ void start_clnt_auth(_adapter *padapter)
 	pmlmeinfo->link_count = 0;
 	pmlmeext->retry = 0;
 
+#if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
+	if (padapter->securitypriv.rsn_akm_suite_type == 8) {
+		RTW_PRINT("start sae external auth\n");
+		if (rtw_cfg80211_indicate_external_auth(padapter) < 0) {
+			pmlmeinfo->state = WIFI_FW_NULL_STATE;
+			report_join_res(padapter, -1, WLAN_STATUS_UNSPECIFIED_FAILURE);
+			return;
+		}
+		set_link_timer(pmlmeext, REAUTH_TO * 10);
+		return;
+	}
+#endif
+
 #ifdef CONFIG_RTW_80211R
 	if (rtw_ft_roam(padapter)) {
 		rtw_ft_set_status(padapter, RTW_FT_AUTHENTICATING_STA);
@@ -12900,6 +12942,17 @@ void link_timer_hdl(void *ctx)
 		pmlmeinfo->state = WIFI_FW_NULL_STATE;
 		report_join_res(padapter, -3, WLAN_STATUS_UNSPECIFIED_FAILURE);
 	} else if (pmlmeinfo->state & WIFI_FW_AUTH_STATE) {
+		/* SAE : ne jamais retomber sur issue_auth() Open */
+		if (padapter->securitypriv.rsn_akm_suite_type == 8) {
+			pmlmeinfo->state = 0;
+			if (pmlmeinfo->auth_status) {
+				report_join_res(padapter, -1, pmlmeinfo->auth_status);
+				pmlmeinfo->auth_status = 0;
+			} else {
+				report_join_res(padapter, -1, WLAN_STATUS_UNSPECIFIED_FAILURE);
+			}
+			return;
+		}
 		/* re-auth timer */
 		if (++pmlmeinfo->reauth_count > REAUTH_LIMIT) {
 			/* if (pmlmeinfo->auth_algo != dot11AuthAlgrthm_Auto) */
