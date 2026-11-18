@@ -750,6 +750,7 @@ struct mlme_priv {
 	_lock	lock;
 	sint	fw_state;	/* shall we protect this variable? maybe not necessarily... */
 	u8	to_join; /* flag */
+	u8	sec_cfg_active; /* protection reset_securitypriv pendant connect */
 	u16 join_status;
 #ifdef CONFIG_LAYER2_ROAMING
 	u8 to_roam; /* roaming trying times */

@@ -106,7 +106,7 @@ void rtw_reset_securitypriv(_adapter *adapter)
 	_enter_critical_bh(&adapter->security_key_mutex, &irqL);
 
 	/* Ne pas écraser une nouvelle connexion déjà engagée (ex. RESET_SECURITYPRIV asynchrone) */
-	if (check_fwstate(&adapter->mlmepriv, _FW_UNDER_LINKING) == _TRUE) {
+	if (adapter->mlmepriv.sec_cfg_active == _TRUE) {
 		_exit_critical_bh(&adapter->security_key_mutex, &irqL);
 		return;
 	}
@@ -177,6 +177,7 @@ void rtw_os_indicate_disconnect(_adapter *adapter,  u16 reason, u8 locally_gener
 	_set_workitem(&adapter->mlmepriv.Linkdown_workitem);
 #endif
 	/* modify for CONFIG_IEEE80211W, none 11w also can use the same command */
+	adapter->mlmepriv.sec_cfg_active = _FALSE;
 	rtw_reset_securitypriv_cmd(adapter);
 
 

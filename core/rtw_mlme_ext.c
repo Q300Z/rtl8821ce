@@ -2047,6 +2047,9 @@ unsigned int OnAuth(_adapter *padapter, union recv_frame *precv_frame)
 	if (!MLME_IS_ASOC(padapter))
 		return _SUCCESS;
 
+	if (len < WLAN_HDR_A3_LEN)
+		return _SUCCESS;
+
 #if defined(CONFIG_IOCTL_CFG80211) && defined(CONFIG_RTW_MESH)
 	if (MLME_IS_MESH(padapter))
 		return rtw_mesh_on_auth(padapter, precv_frame);
@@ -2062,6 +2065,9 @@ unsigned int OnAuth(_adapter *padapter, union recv_frame *precv_frame)
 		u8	*iv;
 		struct rx_pkt_attrib	*prxattrib = &(precv_frame->u.hdr.attrib);
 
+		if (len < WLAN_HDR_A3_LEN + 8)
+			return _SUCCESS;
+
 		prxattrib->hdrlen = WLAN_HDR_A3_LEN;
 		prxattrib->encrypt = _WEP40_;
 
@@ -2076,14 +2082,19 @@ unsigned int OnAuth(_adapter *padapter, union recv_frame *precv_frame)
 		offset = 4;
 	}
 
+	if (len < WLAN_HDR_A3_LEN + offset + 4)
+		return _SUCCESS;
+
 	algorithm = le16_to_cpu(*(u16 *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset));
 	seq	= le16_to_cpu(*(u16 *)((SIZE_PTR)pframe + WLAN_HDR_A3_LEN + offset + 2));
 
 	RTW_INFO("auth alg=%x, seq=%X\n", algorithm, seq);
 
 #if defined(CONFIG_IOCTL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0))
-	/* AP mode SAE : déléguer à hostapd via cfg80211_rx_mgmt */
-	if (algorithm == 3 && padapter->rtw_wdev) {
+	/* AP mode SAE : déléguer à hostapd via cfg80211_rx_mgmt après vérification DA/BSSID */
+	if (algorithm == 3 && padapter->rtw_wdev &&
+	    _rtw_memcmp(adapter_mac_addr(padapter), get_da(pframe), ETH_ALEN) &&
+	    _rtw_memcmp(adapter_mac_addr(padapter), get_hdr_bssid(pframe), ETH_ALEN)) {
 		int freq = rtw_ch2freq(pmlmeext->cur_channel);
 
 		if (freq > 0)
@@ -11259,6 +11270,12 @@ void start_clnt_auth(_adapter *padapter)
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 
 	_cancel_timer_ex(&pmlmeext->link_timer);
+
+	if (pmlmeext->join_abort) {
+		pmlmeinfo->state = WIFI_FW_NULL_STATE;
+		report_join_res(padapter, -4, WLAN_STATUS_UNSPECIFIED_FAILURE);
+		return;
+	}
 
 	pmlmeinfo->state &= (~WIFI_FW_AUTH_NULL);
 	pmlmeinfo->state |= WIFI_FW_AUTH_STATE;

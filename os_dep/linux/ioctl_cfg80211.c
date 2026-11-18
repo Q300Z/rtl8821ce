@@ -3493,7 +3493,7 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 		goto parse_other_ies;
 
 	pwpa = rtw_get_wpa_ie(buf, &wpa_ielen, ielen);
-	if (pwpa && wpa_ielen > 0) {
+	if (pwpa && wpa_ielen > 0 && wpa_ielen + 2 <= sizeof(padapter->securitypriv.supplicant_ie)) {
 		if (rtw_parse_wpa_ie(pwpa, wpa_ielen + 2, &group_cipher, &pairwise_cipher, NULL) == _SUCCESS) {
 			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
 			padapter->securitypriv.ndisauthtype = Ndis802_11AuthModeWPAPSK;
@@ -3504,7 +3504,7 @@ static int rtw_cfg80211_set_wpa_ie(_adapter *padapter, u8 *pie, size_t ielen)
 	}
 
 	pwpa2 = rtw_get_wpa2_ie(buf, &wpa2_ielen, ielen);
-	if (pwpa2 && wpa2_ielen > 0) {
+	if (pwpa2 && wpa2_ielen > 0 && wpa2_ielen + 2 <= sizeof(padapter->securitypriv.supplicant_ie)) {
 		if (rtw_parse_wpa2_ie(pwpa2, wpa2_ielen + 2, &group_cipher, &pairwise_cipher, NULL, &mfp_opt) == _SUCCESS) {
 			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
 			padapter->securitypriv.ndisauthtype = Ndis802_11AuthModeWPA2PSK;
@@ -3929,6 +3929,10 @@ static int cfg80211_rtw_connect(struct wiphy *wiphy, struct net_device *ndev,
 		RTW_INFO("bssid="MAC_FMT"\n", MAC_ARG(sme->bssid));
 
 
+	_enter_critical_bh(&padapter->security_key_mutex, &irqL);
+	padapter->mlmepriv.sec_cfg_active = _TRUE;
+	_exit_critical_bh(&padapter->security_key_mutex, &irqL);
+
 	psecuritypriv->ndisencryptstatus = Ndis802_11EncryptionDisabled;
 	psecuritypriv->dot11PrivacyAlgrthm = _NO_PRIVACY_;
 	psecuritypriv->dot118021XGrpPrivacy = _NO_PRIVACY_;
@@ -4081,6 +4085,8 @@ static int cfg80211_rtw_connect(struct wiphy *wiphy, struct net_device *ndev,
 		psecuritypriv->dot118021XGrpPrivacy);
 
 cancel_ps_deny:
+	if (ret < 0)
+		padapter->mlmepriv.sec_cfg_active = _FALSE;
 	rtw_ps_deny_cancel(padapter, PS_DENY_JOIN);
 
 exit:
@@ -7353,14 +7359,12 @@ static int cfg80211_rtw_mgmt_tx(struct wiphy *wiphy,
 
 	frame_styp = le16_to_cpu(((struct rtw_ieee80211_hdr_3addr *)buf)->frame_ctl) & IEEE80211_FCTL_STYPE;
 
-	/* indicate ack before issue frame to avoid racing with rsp frame (sauf Auth SAE) */
-	if (frame_styp != RTW_IEEE80211_STYPE_AUTH) {
+	/* indicate ack before issue frame to avoid racing with rsp frame */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
-		rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, ack, GFP_KERNEL);
+	rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, ack, GFP_KERNEL);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
-		cfg80211_action_tx_status(ndev, *cookie, buf, len, ack, GFP_KERNEL);
+	cfg80211_action_tx_status(ndev, *cookie, buf, len, ack, GFP_KERNEL);
 #endif
-	}
 
 	if (IEEE80211_STYPE_PROBE_RESP == frame_styp) {
 #ifdef CONFIG_DEBUG_CFG80211
@@ -7447,14 +7451,6 @@ dump:
 	if (tx_ret != _SUCCESS || dump_cnt > 1) {
 		RTW_INFO(FUNC_ADPT_FMT" %s (%d/%d) in %d ms\n", FUNC_ADPT_ARG(padapter),
 			tx_ret == _SUCCESS ? "OK" : "FAIL", dump_cnt, dump_limit, rtw_get_passing_time_ms(start));
-	}
-
-	if (frame_styp == RTW_IEEE80211_STYPE_AUTH) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
-		rtw_cfg80211_mgmt_tx_status(wdev, *cookie, buf, len, tx_ret == _SUCCESS, GFP_KERNEL);
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34) && LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 36))
-		cfg80211_action_tx_status(ndev, *cookie, buf, len, tx_ret == _SUCCESS, GFP_KERNEL);
-#endif
 	}
 
 #ifdef CONFIG_P2P

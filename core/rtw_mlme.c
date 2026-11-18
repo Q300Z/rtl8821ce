@@ -2272,6 +2272,7 @@ void rtw_joinbss_event_prehandle(_adapter *adapter, u8 *pbuf, u16 status)
 		_exit_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
 
 	} else if (pnetwork->join_res == -4) {
+		pmlmepriv->sec_cfg_active = _FALSE;
 		rtw_reset_securitypriv(adapter);
 		pmlmepriv->join_status = status;
 		_set_timer(&pmlmepriv->assoc_timer, 1);
