@@ -10,4 +10,11 @@ rtl8821ce/
 .idea
 build_cache
 build.log
-cppcheck_results.txtbenchmark_results/
+cppcheck_results.txt
+benchmark_results/
+*.ko
+*.mod
+*.mod.c
+Module.symvers
+modules.order
+.tmp_versions/
